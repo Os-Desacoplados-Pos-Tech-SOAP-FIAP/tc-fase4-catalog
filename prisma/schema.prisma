@@ -1,0 +1,81 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TipoInsumo {
+  PECA
+  INSUMO
+}
+
+enum StatusReserva {
+  ATIVA
+  LIBERADA
+  BAIXADA
+}
+
+model Servico {
+  id           String   @id @default(uuid())
+  nome         String
+  descricao    String
+  valorPadrao  Decimal  @db.Decimal(10, 2)
+  ativo        Boolean  @default(true)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+}
+
+model Insumo {
+  id                  String     @id @default(uuid())
+  codigo              String     @unique
+  nome                String
+  tipo                TipoInsumo
+  valorUnitario       Decimal    @db.Decimal(10, 2)
+  quantidadeEstoque   Int
+  quantidadeReservada Int        @default(0)
+  criadoEm            DateTime   @default(now())
+  atualizadoEm        DateTime   @updatedAt
+}
+
+model Reserva {
+  id           String        @id
+  osId         String
+  status       StatusReserva
+  criadoEm     DateTime      @default(now())
+  atualizadoEm DateTime      @updatedAt
+  itens        ReservaItem[]
+
+  @@index([osId, status])
+}
+
+model ReservaItem {
+  id         String  @id @default(uuid())
+  reservaId  String
+  insumoId   String
+  quantidade Int
+  reserva    Reserva @relation(fields: [reservaId], references: [id], onDelete: Cascade)
+}
+
+/// Outbox transacional: gravada junto com o estado, publicada pelo OutboxPublisher.
+model Outbox {
+  id          String    @id @default(uuid())
+  messageId   String    @unique
+  type        String
+  destination String
+  groupId     String
+  body        Json
+  criadoEm    DateTime  @default(now())
+  publicadoEm DateTime?
+
+  @@index([publicadoEm, criadoEm])
+}
+
+/// Idempotência das mensagens recebidas.
+model ProcessedMessage {
+  messageId    String   @id
+  processadoEm DateTime @default(now())
+}
