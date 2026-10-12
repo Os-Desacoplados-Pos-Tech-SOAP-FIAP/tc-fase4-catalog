@@ -6,6 +6,7 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { performance } from 'node:perf_hooks';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
 import { PrismaService } from '../database/prisma.service';
@@ -23,14 +24,20 @@ const TAMANHO_MAXIMO_ERRO = 500;
  */
 export const OUTBOX_LOCK_KEY = 4_271_001;
 
-/** A transação segura o lock durante os envios de rede; o timeout padrão (5s) seria curto. */
-const OPCOES_TRANSACAO = { timeout: 15_000, maxWait: 5_000 };
-
 /**
  * Passado esse tempo no ciclo, não começa novos envios: o resto fica para o próximo ciclo.
  * Evita que um SNS lento estoure o timeout da transação e desfaça o ciclo inteiro.
  */
 const PRAZO_NOVOS_ENVIOS_MS = 5_000;
+
+/**
+ * A transação segura o lock durante os envios de rede. Invariante:
+ * PRAZO_NOVOS_ENVIOS_MS + pior envio (maxAttempts × (connectionTimeout + requestTimeout))
+ * + I/O do banco < TIMEOUT_TRANSACAO_MS. Com os clientes de publicação do MessagingModule:
+ * 5s + 2 × (2s + 3s) = 15s, então 20s deixa folga para o banco.
+ */
+const TIMEOUT_TRANSACAO_MS = 20_000;
+const OPCOES_TRANSACAO = { timeout: TIMEOUT_TRANSACAO_MS, maxWait: 5_000 };
 
 interface OutboxPendente {
   id: string;
@@ -91,10 +98,10 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
         SELECT pg_try_advisory_xact_lock(${OUTBOX_LOCK_KEY}::bigint) AS "obtido"`;
       if (!obtido) return 0; // outra réplica está publicando
 
-      const inicio = Date.now();
+      const inicio = performance.now();
       const gruposComFalha = new Set<string>();
       let total = 0;
-      while (Date.now() - inicio <= PRAZO_NOVOS_ENVIOS_MS) {
+      while (performance.now() - inicio <= PRAZO_NOVOS_ENVIOS_MS) {
         const pendentes = await this.cabecasDosGrupos(tx, gruposComFalha);
         if (pendentes.length === 0) break;
         total += await this.enviarRodada(tx, pendentes, inicio, gruposComFalha);
@@ -135,7 +142,7 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
   ): Promise<number> {
     const enviados: string[] = [];
     for (const pendente of pendentes) {
-      if (Date.now() - inicio > PRAZO_NOVOS_ENVIOS_MS) break;
+      if (performance.now() - inicio > PRAZO_NOVOS_ENVIOS_MS) break;
       try {
         await this.transporte.enviar(pendente.destination, pendente.body, pendente.traceparent);
         enviados.push(pendente.id);

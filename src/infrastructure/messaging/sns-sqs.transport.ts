@@ -1,15 +1,21 @@
 import { PublishCommand, SNSClient } from '@aws-sdk/client-sns';
 import { MessageAttributeValue, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
+
+/**
+ * Cliente SQS só de publicação: o do consumidor tem timeout longo por causa do long-poll,
+ * o que deixaria um envio da outbox sem limite dentro da transação.
+ */
+export const SQS_PUBLICACAO = Symbol('SqsPublicacao');
 
 /** Publica num tópico SNS (ARN) ou fila SQS (URL), sempre FIFO e agrupado pela OS. */
 @Injectable()
 export class SnsSqsTransport {
   constructor(
     private readonly sns: SNSClient,
-    private readonly sqs: SQSClient,
+    @Inject(SQS_PUBLICACAO) private readonly sqs: SQSClient,
   ) {}
 
   async enviar(destino: string, envelope: MessageEnvelope, traceparent?: string | null): Promise<void> {
