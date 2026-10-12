@@ -65,6 +65,7 @@ describe('ReservarInsumos com Postgres (integração)', () => {
       useCase.execute({ messageId: 'cmd-b', correlationId: 'os-b', itens: item }),
     ]);
 
+    expect(await prisma.reserva.count()).toBe(1);
     expect((await insumos.buscarPorId(ultima.id))!.estoque.quantidadeReservada).toBe(1);
     const tipos = (await prisma.outbox.findMany()).map((e) => e.type).sort();
     expect(tipos).toEqual(

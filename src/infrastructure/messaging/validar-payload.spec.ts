@@ -1,4 +1,3 @@
-import 'reflect-metadata';
 import { Type } from 'class-transformer';
 import { IsArray, IsInt, IsUUID, Min, ValidateNested } from 'class-validator';
 

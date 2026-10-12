@@ -6,7 +6,17 @@ export async function conectar(): Promise<PrismaService> {
   return prisma;
 }
 
+function nomeDoBanco(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) return '';
+  return new URL(url).pathname.replace(/^\//, '');
+}
+
 export async function limparBanco(prisma: PrismaService): Promise<void> {
+  const banco = nomeDoBanco();
+  if (!banco.endsWith('_test')) {
+    throw new Error(`limparBanco recusado: o banco "${banco}" não termina com "_test"`);
+  }
   await prisma.$executeRawUnsafe(
     'TRUNCATE TABLE "ReservaItem", "Reserva", "Insumo", "Servico", "Outbox", "ProcessedMessage" CASCADE',
   );

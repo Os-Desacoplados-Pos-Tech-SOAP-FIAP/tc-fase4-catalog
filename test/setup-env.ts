@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 process.env.DATABASE_URL ??=
   'postgresql://catalog:catalog@localhost:5434/catalog_test?schema=public';
 process.env.JWT_SECRET ??= 'segredo-de-teste';
