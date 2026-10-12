@@ -66,6 +66,8 @@ model ReservaItem {
 
 /// Outbox transacional: gravada junto com o estado, publicada pelo OutboxPublisher.
 /// `seq` define a ordem de publicação (criadoEm pode empatar ou vir fora de ordem entre transações).
+// Índice parcial "Outbox_pendentes_grupo_idx" ("groupId", "seq") WHERE "publicadoEm" IS NULL fica
+// na migração 20261012190000_outbox_pendentes_grupo_idx: o Prisma não expressa índice com WHERE.
 model Outbox {
   id          String    @id @default(uuid())
   seq         BigInt    @unique @default(autoincrement())
