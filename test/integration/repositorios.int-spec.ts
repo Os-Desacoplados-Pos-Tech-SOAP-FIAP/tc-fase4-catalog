@@ -1,3 +1,5 @@
+import { propagation } from '@opentelemetry/api';
+
 import { ConflitoError } from '../../src/application/errors';
 import { Insumo, TipoInsumo } from '../../src/domain/insumo/entities/Insumo';
 import { Reserva, StatusReserva } from '../../src/domain/reserva/entities/Reserva';
@@ -142,6 +144,33 @@ describe('Repositórios Prisma (integração)', () => {
         publicadoEm: null,
       });
       expect(linha.body).toEqual(envelope);
+      expect(linha.traceparent).toBeNull(); // sem SDK de tracing registrado não há contexto ativo
+    });
+
+    it('grava no destino informado (ex.: fila de comando de outro serviço)', async () => {
+      const outbox = new PrismaOutbox(tm, lerMessagingConfig({}));
+      const fila = 'http://localhost:4566/000000000000/oficina-billing-inbox.fifo';
+      const envelope = criarEnvelope('billing.x.v1', 'os-1', {});
+      await outbox.publicar(envelope, fila);
+
+      const linha = await prisma.outbox.findUniqueOrThrow({ where: { messageId: envelope.messageId } });
+      expect(linha.destination).toBe(fila);
+    });
+
+    it('captura o traceparent do contexto W3C ativo', async () => {
+      const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+      const inject = jest.spyOn(propagation, 'inject').mockImplementation((_ctx, carrier) => {
+        (carrier as Record<string, string>).traceparent = traceparent;
+      });
+      const envelope = criarEnvelope('catalog.x.v1', 'os-1', {});
+      try {
+        await new PrismaOutbox(tm, lerMessagingConfig({})).publicar(envelope);
+      } finally {
+        inject.mockRestore();
+      }
+
+      const linha = await prisma.outbox.findUniqueOrThrow({ where: { messageId: envelope.messageId } });
+      expect(linha.traceparent).toBe(traceparent);
     });
   });
 });

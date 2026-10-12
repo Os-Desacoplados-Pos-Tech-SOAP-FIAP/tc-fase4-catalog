@@ -1,6 +1,9 @@
 import { MessageEnvelope } from './message-envelope';
 
-/** Grava um evento para publicação no tópico do serviço, na transação corrente. */
+/**
+ * Grava um evento/comando para publicação, na transação corrente. Sem `destino`, vai para
+ * o tópico de eventos do serviço; com ele, para outro tópico (ARN) ou fila de comando (URL).
+ */
 export interface IOutbox {
-  publicar(envelope: MessageEnvelope): Promise<void>;
+  publicar(envelope: MessageEnvelope, destino?: string): Promise<void>;
 }

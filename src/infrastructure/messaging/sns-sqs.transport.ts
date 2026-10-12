@@ -1,5 +1,5 @@
 import { PublishCommand, SNSClient } from '@aws-sdk/client-sns';
-import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { MessageAttributeValue, SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { Injectable } from '@nestjs/common';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
@@ -12,12 +12,16 @@ export class SnsSqsTransport {
     private readonly sqs: SQSClient,
   ) {}
 
-  async enviar(destino: string, envelope: MessageEnvelope): Promise<void> {
+  async enviar(destino: string, envelope: MessageEnvelope, traceparent?: string | null): Promise<void> {
     const corpo = JSON.stringify(envelope);
+    const atributos: Record<string, MessageAttributeValue> = {
+      type: { DataType: 'String', StringValue: envelope.type },
+    };
+    if (traceparent) atributos.traceparent = { DataType: 'String', StringValue: traceparent };
     const comum = {
       MessageGroupId: envelope.correlationId,
       MessageDeduplicationId: envelope.messageId,
-      MessageAttributes: { type: { DataType: 'String', StringValue: envelope.type } },
+      MessageAttributes: atributos,
     };
 
     if (destino.startsWith('arn:aws:sns:')) {

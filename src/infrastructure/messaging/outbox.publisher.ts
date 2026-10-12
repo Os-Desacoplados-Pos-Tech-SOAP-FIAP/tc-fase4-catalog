@@ -5,6 +5,7 @@ import {
   Logger,
   OnApplicationBootstrap,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
 import { PrismaService } from '../database/prisma.service';
@@ -25,8 +26,8 @@ export const OUTBOX_LOCK_KEY = 4_271_001;
 const OPCOES_TRANSACAO = { timeout: 15_000, maxWait: 5_000 };
 
 /**
- * Passado esse tempo no lote, não começa novos envios: o resto fica para o próximo ciclo.
- * Evita que um SNS lento estoure o timeout da transação e desfaça o lote inteiro a cada ciclo.
+ * Passado esse tempo no ciclo, não começa novos envios: o resto fica para o próximo ciclo.
+ * Evita que um SNS lento estoure o timeout da transação e desfaça o ciclo inteiro.
  */
 const PRAZO_NOVOS_ENVIOS_MS = 5_000;
 
@@ -36,12 +37,14 @@ interface OutboxPendente {
   type: string;
   destination: string;
   body: MessageEnvelope;
+  traceparent: string | null;
 }
 
 /**
- * Publica a outbox em ordem de `seq` com um único publicador ativo (advisory lock): com
- * duas réplicas publicando, mensagens da mesma OS poderiam sair fora de ordem. Falha num
- * envio afeta só a OS da mensagem: as seguintes dela ficam para depois e as outras OS seguem.
+ * Publica a outbox em ordem de `seq` dentro de cada OS, com um único publicador ativo
+ * (advisory lock): com duas réplicas publicando, mensagens da mesma OS poderiam sair fora
+ * de ordem. Falha num envio afeta só a OS da mensagem: as seguintes dela ficam para o
+ * próximo ciclo e as outras OS seguem.
  * Reenvio (ex.: transação desfeita após envio) é absorvido pela deduplicação FIFO e pela
  * idempotência dos consumidores.
  */
@@ -87,42 +90,70 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
         SELECT pg_try_advisory_xact_lock(${OUTBOX_LOCK_KEY}::bigint) AS "obtido"`;
       if (!obtido) return 0; // outra réplica está publicando
 
-      // Sem FOR UPDATE: o advisory lock já garante um só publicador, lock de linha seria redundante.
-      const pendentes = await tx.$queryRaw<OutboxPendente[]>`
-        SELECT "id", "groupId", "type", "destination", "body" FROM "Outbox"
-        WHERE "publicadoEm" IS NULL
-        ORDER BY "seq"
-        LIMIT ${LOTE}`;
-
       const inicio = Date.now();
-      const enviados: string[] = [];
       const gruposComFalha = new Set<string>();
-      for (const pendente of pendentes) {
-        if (Date.now() - inicio > PRAZO_NOVOS_ENVIOS_MS) break;
-        if (gruposComFalha.has(pendente.groupId)) continue;
-        try {
-          await this.transporte.enviar(pendente.destination, pendente.body);
-          enviados.push(pendente.id);
-        } catch (erro) {
-          gruposComFalha.add(pendente.groupId);
-          const motivo = (erro as Error).message;
-          this.logger.error(
-            `Falha ao publicar outbox id=${pendente.id} groupId=${pendente.groupId} type=${pendente.type}: ${motivo}`,
-          );
-          await tx.outbox.update({
-            where: { id: pendente.id },
-            data: { tentativas: { increment: 1 }, ultimoErro: motivo.slice(0, TAMANHO_MAXIMO_ERRO) },
-          });
-        }
+      let total = 0;
+      while (Date.now() - inicio <= PRAZO_NOVOS_ENVIOS_MS) {
+        const pendentes = await this.cabecasDosGrupos(tx, gruposComFalha);
+        if (pendentes.length === 0) break;
+        total += await this.enviarRodada(tx, pendentes, inicio, gruposComFalha);
       }
+      return total;
+    }, OPCOES_TRANSACAO);
+  }
 
-      if (enviados.length > 0) {
-        await tx.outbox.updateMany({
-          where: { id: { in: enviados } },
-          data: { publicadoEm: new Date() },
+  /**
+   * Só a mensagem mais antiga de cada OS entra na rodada: backlog de uma OS não ocupa o
+   * lote e a ordem por OS é preservada. OS que já falharam no ciclo ficam de fora das
+   * rodadas seguintes, liberando o lote para as demais (sem inanição).
+   * Sem FOR UPDATE: o advisory lock já garante um só publicador.
+   */
+  private cabecasDosGrupos(
+    tx: Prisma.TransactionClient,
+    gruposComFalha: Set<string>,
+  ): Promise<OutboxPendente[]> {
+    return tx.$queryRaw<OutboxPendente[]>`
+      SELECT * FROM (
+        SELECT DISTINCT ON ("groupId") "id", "destination", "body", "groupId", "type", "traceparent", "seq"
+        FROM "Outbox"
+        WHERE "publicadoEm" IS NULL AND NOT ("groupId" = ANY(${[...gruposComFalha]}::text[]))
+        ORDER BY "groupId", "seq"
+      ) h
+      ORDER BY h."seq"
+      LIMIT ${LOTE}`;
+  }
+
+  private async enviarRodada(
+    tx: Prisma.TransactionClient,
+    pendentes: OutboxPendente[],
+    inicio: number,
+    gruposComFalha: Set<string>,
+  ): Promise<number> {
+    const enviados: string[] = [];
+    for (const pendente of pendentes) {
+      if (Date.now() - inicio > PRAZO_NOVOS_ENVIOS_MS) break;
+      try {
+        await this.transporte.enviar(pendente.destination, pendente.body, pendente.traceparent);
+        enviados.push(pendente.id);
+      } catch (erro) {
+        gruposComFalha.add(pendente.groupId);
+        const motivo = (erro as Error).message;
+        this.logger.error(
+          `Falha ao publicar outbox id=${pendente.id} groupId=${pendente.groupId} type=${pendente.type}: ${motivo}`,
+        );
+        await tx.outbox.update({
+          where: { id: pendente.id },
+          data: { tentativas: { increment: 1 }, ultimoErro: motivo.slice(0, TAMANHO_MAXIMO_ERRO) },
         });
       }
-      return enviados.length;
-    }, OPCOES_TRANSACAO);
+    }
+
+    if (enviados.length > 0) {
+      await tx.outbox.updateMany({
+        where: { id: { in: enviados } },
+        data: { publicadoEm: new Date() },
+      });
+    }
+    return enviados.length;
   }
 }

@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { propagation } from '@opentelemetry/api';
 
 import { criarEnvelope, MessageEnvelope } from '../../src/application/ports/message-envelope';
 import { PrismaService } from '../../src/infrastructure/database/prisma.service';
@@ -12,7 +13,7 @@ import { conectar, limparBanco } from '../helpers/database';
 describe('OutboxPublisher (integração)', () => {
   let prisma: PrismaService;
   let outbox: PrismaOutbox;
-  let enviados: { destino: string; envelope: MessageEnvelope }[];
+  let enviados: { destino: string; envelope: MessageEnvelope; traceparent?: string | null }[];
   let enviar: jest.Mock;
   let publisher: OutboxPublisher;
 
@@ -37,8 +38,8 @@ describe('OutboxPublisher (integração)', () => {
   beforeEach(async () => {
     await limparBanco(prisma);
     enviados = [];
-    enviar = jest.fn(async (destino: string, envelope: MessageEnvelope) => {
-      enviados.push({ destino, envelope });
+    enviar = jest.fn(async (destino: string, envelope: MessageEnvelope, traceparent?: string | null) => {
+      enviados.push({ destino, envelope, traceparent });
     });
     publisher = novoPublisher();
   });
@@ -116,8 +117,62 @@ describe('OutboxPublisher (integração)', () => {
     expect(await novoPublisher().publicarPendentes()).toBe(0);
 
     liberar();
-    expect(await primeiro).toBe(2);
-    expect(await publisher.publicarPendentes()).toBe(1);
+    // O dono do lock publica `c` numa rodada seguinte do mesmo ciclo, depois de `a`.
+    expect(await primeiro).toBe(3);
+    expect(await publisher.publicarPendentes()).toBe(0);
     expect(idsEnviados()).toEqual([a.messageId, b.messageId, c.messageId]);
+  });
+
+  it('repassa ao transporte o traceparent gravado na outbox', async () => {
+    const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+    const inject = jest.spyOn(propagation, 'inject').mockImplementation((_ctx, carrier) => {
+      (carrier as Record<string, string>).traceparent = traceparent;
+    });
+    try {
+      await registrar('t.com-trace', 'os-1');
+    } finally {
+      inject.mockRestore();
+    }
+    await registrar('t.sem-trace', 'os-2');
+
+    expect(await publisher.publicarPendentes()).toBe(2);
+    expect(enviados.map((e) => e.traceparent)).toEqual([traceparent, null]);
+  });
+
+  describe('sem inanição: OS com falha não ocupa o lote das demais', () => {
+    const falhaNasOsQuebradas = async (destino: string, envelope: MessageEnvelope) => {
+      if (envelope.correlationId.startsWith('os-quebrada')) throw new Error('destino fora');
+      enviados.push({ destino, envelope });
+    };
+    let logErro: jest.SpyInstance;
+    beforeEach(() => {
+      enviar.mockImplementation(falhaNasOsQuebradas);
+      logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    });
+    afterEach(() => logErro.mockRestore());
+
+    it('10 OS falhando à frente na fila não impedem a OS saudável no mesmo ciclo', async () => {
+      const quebradas: MessageEnvelope[] = [];
+      for (let i = 0; i < 10; i++) quebradas.push(await registrar(`t.q${i}`, `os-quebrada-${i}`));
+      const ok1 = await registrar('t.ok1', 'os-saudavel');
+      const ok2 = await registrar('t.ok2', 'os-saudavel');
+
+      expect(await publisher.publicarPendentes()).toBe(2);
+      expect(idsEnviados()).toEqual([ok1.messageId, ok2.messageId]);
+      // Cada OS quebrada é tentada uma única vez por ciclo.
+      for (const q of quebradas) expect((await linha(q)).tentativas).toBe(1);
+    });
+
+    it('backlog de uma OS com falha não consome o lote', async () => {
+      const backlog: MessageEnvelope[] = [];
+      for (let i = 0; i < 10; i++) backlog.push(await registrar(`t.b${i}`, 'os-quebrada'));
+      const ok = await registrar('t.ok', 'os-saudavel');
+
+      expect(await publisher.publicarPendentes()).toBe(1);
+      expect(idsEnviados()).toEqual([ok.messageId]);
+      expect(enviar).toHaveBeenCalledTimes(2);
+      expect((await linha(backlog[0])).tentativas).toBe(1);
+      expect((await linha(backlog[1])).tentativas).toBe(0);
+    });
   });
 });
