@@ -1,0 +1,93 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TipoInsumo {
+  PECA
+  INSUMO
+}
+
+enum StatusReserva {
+  ATIVA
+  LIBERADA
+  BAIXADA
+}
+
+model Servico {
+  id           String   @id @default(uuid())
+  nome         String
+  descricao    String
+  valorPadrao  Decimal  @db.Decimal(10, 2)
+  ativo        Boolean  @default(true)
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+}
+
+model Insumo {
+  id                  String     @id @default(uuid())
+  codigo              String     @unique
+  nome                String
+  tipo                TipoInsumo
+  valorUnitario       Decimal    @db.Decimal(10, 2)
+  quantidadeEstoque   Int
+  quantidadeReservada Int        @default(0)
+  criadoEm            DateTime   @default(now())
+  atualizadoEm        DateTime   @updatedAt
+}
+
+// Índice único parcial "Reserva_osId_ativa_key" (uma reserva ATIVA por OS) fica na migração
+// 20261012181000_reserva_ativa_unica_por_os: o Prisma não expressa índice com WHERE.
+model Reserva {
+  id           String        @id
+  osId         String
+  status       StatusReserva
+  criadoEm     DateTime      @default(now())
+  atualizadoEm DateTime      @updatedAt
+  itens        ReservaItem[]
+
+  @@index([osId, status])
+}
+
+model ReservaItem {
+  id         String  @id @default(uuid())
+  reservaId  String
+  insumoId   String
+  quantidade Int
+  reserva    Reserva @relation(fields: [reservaId], references: [id], onDelete: Cascade)
+
+  @@index([reservaId])
+}
+
+/// Outbox transacional: gravada junto com o estado, publicada pelo OutboxPublisher.
+/// `seq` define a ordem de publicação (criadoEm pode empatar ou vir fora de ordem entre transações).
+// Índice parcial "Outbox_pendentes_grupo_idx" ("groupId", "seq") WHERE "publicadoEm" IS NULL fica
+// na migração 20261012190000_outbox_pendentes_grupo_idx: o Prisma não expressa índice com WHERE.
+model Outbox {
+  id          String    @id @default(uuid())
+  seq         BigInt    @unique @default(autoincrement())
+  messageId   String    @unique
+  type        String
+  destination String
+  groupId     String
+  body        Json
+  criadoEm    DateTime  @default(now())
+  publicadoEm DateTime?
+  tentativas  Int       @default(0)
+  ultimoErro  String?
+  /// Contexto W3C de quem gravou o evento, para continuar o trace no consumidor.
+  traceparent String?
+
+  @@index([publicadoEm, seq])
+}
+
+/// Idempotência das mensagens recebidas.
+model ProcessedMessage {
+  messageId    String   @id
+  processadoEm DateTime @default(now())
+}
