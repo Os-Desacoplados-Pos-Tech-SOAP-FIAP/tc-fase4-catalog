@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 
 import { ListarReservasUseCase } from '../../application/reserva/listar-reservas/ListarReservasUseCase';
@@ -22,7 +22,7 @@ export class ReservaController {
   @ApiQuery({ name: 'osId', required: true })
   @ApiResponse({ status: 200, type: ReservaResponseDto, isArray: true })
   @ApiAuthResponses()
-  async list(@Query('osId') osId: string): Promise<ReservaResponseDto[]> {
+  async list(@Query('osId', ParseUUIDPipe) osId: string): Promise<ReservaResponseDto[]> {
     return (await this.listar.execute(osId)).map((r) => ReservaResponseDto.fromDomain(r));
   }
 }
