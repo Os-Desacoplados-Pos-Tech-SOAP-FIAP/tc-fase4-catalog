@@ -90,6 +90,7 @@ describe('ReservarInsumosUseCase', () => {
   it('OS sem insumos gera reserva vazia e sucesso', async () => {
     await useCase.execute(comando([]));
     expect(outbox.tipos()).toEqual([CATALOG_EVENTS.INSUMOS_RESERVADOS]);
+    expect((await reservas.buscarAtivaPorOs(OS))!.itens).toEqual([]);
   });
 
   it('é idempotente por messageId', async () => {
@@ -124,5 +125,6 @@ describe('ReservarInsumosUseCase', () => {
     ).rejects.toThrow('conexão perdida');
     expect(outbox.mensagens).toHaveLength(0);
     expect(processadas.ids.size).toBe(0);
+    expect((await insumos.buscarPorId(filtro.id))!.estoque.quantidadeReservada).toBe(0);
   });
 });

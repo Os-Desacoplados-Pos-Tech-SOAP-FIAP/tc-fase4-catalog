@@ -52,5 +52,6 @@ describe('BaixarReservasUseCase', () => {
     await useCase.execute({ messageId: 'cmd-9', correlationId: OS });
     await useCase.execute({ messageId: 'cmd-9', correlationId: OS });
     expect((await insumos.buscarPorId(filtro.id))!.estoque.quantidade).toBe(3);
+    expect(outbox.mensagens).toHaveLength(1);
   });
 });
