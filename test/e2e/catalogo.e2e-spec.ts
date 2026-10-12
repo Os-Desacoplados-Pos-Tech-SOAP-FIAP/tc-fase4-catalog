@@ -62,14 +62,16 @@ describe('Catálogo (e2e)', () => {
     await http().get('/api/catalog/servicos').set('Authorization', mecanico).expect(200)
       .expect((res) => expect(res.body).toHaveLength(1));
     await http().get('/api/catalog/servicos/11111111-1111-4111-8111-111111111111')
-      .set('Authorization', admin).expect(404);
+      .set('Authorization', admin).expect(404)
+      .expect((res) => expect(res.body).toMatchObject({ statusCode: 404, code: 'RECURSO_NAO_ENCONTRADO' }));
     await http().get('/api/catalog/servicos/nao-uuid').set('Authorization', admin).expect(400);
   });
 
   it('insumo: cadastro, conflito, busca, estoque e validações', async () => {
     const corpo = { codigo: 'FIL-001', nome: 'Filtro', tipo: 'PECA', valorUnitario: 45, quantidadeEstoque: 10 };
     const criado = await http().post('/api/catalog/insumos').set('Authorization', admin).send(corpo).expect(201);
-    await http().post('/api/catalog/insumos').set('Authorization', admin).send(corpo).expect(409);
+    await http().post('/api/catalog/insumos').set('Authorization', admin).send(corpo).expect(409)
+      .expect((res) => expect(res.body).toMatchObject({ statusCode: 409, code: 'INSUMO_CODIGO_DUPLICADO' }));
 
     const id = criado.body.id as string;
     await http().get(`/api/catalog/insumos/${id}`).set('Authorization', mecanico).expect(200)

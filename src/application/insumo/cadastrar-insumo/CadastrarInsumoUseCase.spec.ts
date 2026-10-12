@@ -1,5 +1,4 @@
-import { ConflictException } from '@nestjs/common';
-
+import { ConflitoError } from '../../errors';
 import { Insumo, TipoInsumo } from '../../../domain/insumo/entities/Insumo';
 import { IInsumoRepository } from '../../../domain/insumo/repositories/IInsumoRepository';
 import { UniqueID } from '../../../domain/shared/UniqueID';
@@ -25,10 +24,10 @@ describe('CadastrarInsumoUseCase', () => {
     expect(repo.insumos).toHaveLength(1);
   });
 
-  it('lança ConflictException para código duplicado', async () => {
+  it('lança ConflitoError INSUMO_CODIGO_DUPLICADO para código duplicado', async () => {
     const repo = new InMemoryInsumoRepository();
     const useCase = new CadastrarInsumoUseCase(repo);
     await useCase.execute(base);
-    await expect(useCase.execute({ ...base, nome: 'Outro Filtro' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(useCase.execute({ ...base, nome: 'Outro Filtro' })).rejects.toMatchObject({ constructor: ConflitoError, code: 'INSUMO_CODIGO_DUPLICADO' });
   });
 });

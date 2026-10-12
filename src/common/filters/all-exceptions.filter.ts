@@ -1,7 +1,13 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import { Response } from 'express';
 
+import { ConflitoError, RecursoNaoEncontradoError } from '../../application/errors';
 import { DomainError } from '../../domain/shared/DomainError';
+
+interface ErroComCode {
+  code: string;
+  message: string;
+}
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -12,12 +18,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
 
     if (exception instanceof DomainError) {
-      response.status(422).json({
-        statusCode: 422,
-        error: 'Unprocessable Entity',
-        code: exception.code,
-        message: exception.message,
-      });
+      this.responderComCode(response, 422, 'Unprocessable Entity', exception);
+      return;
+    }
+
+    if (exception instanceof RecursoNaoEncontradoError) {
+      this.responderComCode(response, 404, 'Not Found', exception);
+      return;
+    }
+
+    if (exception instanceof ConflitoError) {
+      this.responderComCode(response, 409, 'Conflict', exception);
       return;
     }
 
@@ -34,5 +45,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error: 'Internal Server Error',
       message: 'Erro interno do servidor',
     });
+  }
+
+  private responderComCode(response: Response, statusCode: number, error: string, exception: ErroComCode): void {
+    response.status(statusCode).json({ statusCode, error, code: exception.code, message: exception.message });
   }
 }

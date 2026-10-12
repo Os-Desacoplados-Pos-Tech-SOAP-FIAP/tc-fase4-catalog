@@ -1,5 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
-
+import { RecursoNaoEncontradoError } from '../../errors';
 import { Insumo, TipoInsumo } from '../../../domain/insumo/entities/Insumo';
 import { UniqueID } from '../../../domain/shared/UniqueID';
 import { InMemoryInsumoRepository } from '../../../../test/fakes/in-memory-insumo.repository';
@@ -32,8 +31,8 @@ describe('AtualizarEstoqueUseCase', () => {
     expect(result.estoque.quantidadeReservada).toBe(3);
   });
 
-  it('lança NotFoundException para insumo inexistente', async () => {
-    await expect(useCase.execute({ id: new UniqueID().toValue(), quantidade: 10 })).rejects.toBeInstanceOf(NotFoundException);
+  it('lança RecursoNaoEncontradoError para insumo inexistente', async () => {
+    await expect(useCase.execute({ id: new UniqueID().toValue(), quantidade: 10 })).rejects.toBeInstanceOf(RecursoNaoEncontradoError);
   });
 
   it('rejeita quantidade menor que a reservada', async () => {

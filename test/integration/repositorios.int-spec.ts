@@ -1,3 +1,4 @@
+import { ConflitoError } from '../../src/application/errors';
 import { Insumo, TipoInsumo } from '../../src/domain/insumo/entities/Insumo';
 import { Reserva, StatusReserva } from '../../src/domain/reserva/entities/Reserva';
 import { Servico } from '../../src/domain/servico/entities/Servico';
@@ -61,6 +62,16 @@ describe('Repositórios Prisma (integração)', () => {
       const lista = await repo.listar();
       expect(lista.map((i) => i.nome)).toEqual(['Filtro', 'Óleo']);
       expect(lista[1].tipo).toBe(TipoInsumo.INSUMO);
+    });
+
+    it('código duplicado (corrida entre cadastros) vira ConflitoError INSUMO_CODIGO_DUPLICADO', async () => {
+      const repo = new PrismaInsumoRepository(tm);
+      await repo.salvar(novoInsumo('DUP-1'));
+      await expect(repo.salvar(novoInsumo('DUP-1'))).rejects.toMatchObject({
+        constructor: ConflitoError,
+        code: 'INSUMO_CODIGO_DUPLICADO',
+        message: 'Já existe peça/insumo com este código',
+      });
     });
 
     it('buscarParaAtualizacao trava e devolve só os ids pedidos', async () => {

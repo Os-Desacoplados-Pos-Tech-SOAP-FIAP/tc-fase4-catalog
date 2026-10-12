@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { INJECTION_TOKENS } from '../../../common/constants/injection-tokens';
-import { ensureFound } from '../../../common/utils/ensure-found';
+import { ensureFound } from '../../ensure-found';
 import { Insumo } from '../../../domain/insumo/entities/Insumo';
 import { IInsumoRepository } from '../../../domain/insumo/repositories/IInsumoRepository';
 import { UniqueID } from '../../../domain/shared/UniqueID';

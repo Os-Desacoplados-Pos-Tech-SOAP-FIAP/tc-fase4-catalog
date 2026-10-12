@@ -2,7 +2,6 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
-import { DomainExceptionFilter } from './common/filters/domain-exception.filter';
 
 export const PREFIXO = 'api/catalog';
 
@@ -16,7 +15,7 @@ export function configurarApp(app: INestApplication): void {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
-  app.useGlobalFilters(new AllExceptionsFilter(), new DomainExceptionFilter());
+  app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors();
 
   const documento = SwaggerModule.createDocument(

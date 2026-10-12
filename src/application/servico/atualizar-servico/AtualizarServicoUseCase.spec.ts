@@ -1,5 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
-
+import { RecursoNaoEncontradoError } from '../../errors';
 import { Servico } from '../../../domain/servico/entities/Servico';
 import { IServicoRepository } from '../../../domain/servico/repositories/IServicoRepository';
 import { UniqueID } from '../../../domain/shared/UniqueID';
@@ -31,7 +30,7 @@ describe('AtualizarServicoUseCase', () => {
     expect(result.valorPadrao.value).toBe(80);
   });
 
-  it('lança NotFoundException para serviço inexistente', async () => {
-    await expect(useCase.execute({ id: new UniqueID().toValue(), nome: 'X' })).rejects.toBeInstanceOf(NotFoundException);
+  it('lança RecursoNaoEncontradoError para serviço inexistente', async () => {
+    await expect(useCase.execute({ id: new UniqueID().toValue(), nome: 'X' })).rejects.toBeInstanceOf(RecursoNaoEncontradoError);
   });
 });

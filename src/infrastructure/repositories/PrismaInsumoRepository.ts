@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Insumo as InsumoRow, Prisma, TipoInsumo as TipoInsumoRow } from '@prisma/client';
 
+import { ConflitoError } from '../../application/errors';
 import { Insumo, TipoInsumo } from '../../domain/insumo/entities/Insumo';
 import { IInsumoLockingRepository } from '../../domain/insumo/repositories/IInsumoLockingRepository';
 import { CodigoPeca } from '../../domain/insumo/value-objects/CodigoPeca';
@@ -37,11 +38,19 @@ export class PrismaInsumoRepository implements IInsumoLockingRepository {
       quantidadeEstoque: insumo.estoque.quantidade,
       quantidadeReservada: insumo.estoque.quantidadeReservada,
     };
-    await this.db.client.insumo.upsert({
-      where: { id: insumo.id.toValue() },
-      create: { id: insumo.id.toValue(), ...data },
-      update: data,
-    });
+    try {
+      await this.db.client.insumo.upsert({
+        where: { id: insumo.id.toValue() },
+        create: { id: insumo.id.toValue(), ...data },
+        update: data,
+      });
+    } catch (erro) {
+      // Dois cadastros simultâneos passam pela checagem do caso de uso; a unique do banco decide.
+      if (erro instanceof Prisma.PrismaClientKnownRequestError && erro.code === 'P2002') {
+        throw new ConflitoError('Já existe peça/insumo com este código', 'INSUMO_CODIGO_DUPLICADO');
+      }
+      throw erro;
+    }
     // Eventos de domínio do Insumo não são publicados: a integração usa a outbox.
     insumo.clearEvents();
   }
