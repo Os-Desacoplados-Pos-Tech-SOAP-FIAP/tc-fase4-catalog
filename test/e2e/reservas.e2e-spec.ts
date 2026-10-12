@@ -18,6 +18,7 @@ describe('Reservas pela mensageria (e2e)', () => {
   let prisma: PrismaService;
   let registry: MessageHandlerRegistry;
   const admin = token(PerfilAcesso.ADMINISTRADOR);
+  const cliente = token(PerfilAcesso.CLIENTE);
 
   beforeAll(async () => {
     app = await criarApp();
@@ -28,20 +29,30 @@ describe('Reservas pela mensageria (e2e)', () => {
   afterAll(() => app.close());
 
   const tiposNaOutbox = async () =>
-    (await prisma.outbox.findMany({ orderBy: { criadoEm: 'asc' } })).map((o) => o.type);
+    (await prisma.outbox.findMany({ orderBy: { seq: 'asc' } })).map((o) => o.type);
 
-  it('reservar → liberar (compensação) com histórico visível em GET /reservas', async () => {
-    const insumo = await request(app.getHttpServer())
+  const criarInsumo = async () =>
+    (await request(app.getHttpServer())
       .post('/api/catalog/insumos').set('Authorization', admin)
       .send({ codigo: 'FIL-001', nome: 'Filtro', tipo: 'PECA', valorUnitario: 45, quantidadeEstoque: 5 })
-      .expect(201);
+      .expect(201)).body.id as string;
+
+  const buscarInsumo = async (id: string) =>
+    (await request(app.getHttpServer())
+      .get(`/api/catalog/insumos/${id}`).set('Authorization', admin).expect(200)).body;
+
+  it('reservar → liberar (compensação) com histórico visível em GET /reservas', async () => {
+    const insumoId = await criarInsumo();
 
     await registry.despachar(
       criarEnvelope(CATALOG_COMMANDS.RESERVAR_INSUMOS, OS, {
-        itens: [{ insumoId: insumo.body.id, quantidade: 2 }],
+        itens: [{ insumoId, quantidade: 2 }],
       }),
     );
+    expect(await buscarInsumo(insumoId)).toMatchObject({ quantidadeDisponivel: 3, quantidadeReservada: 2 });
+
     await registry.despachar(criarEnvelope(CATALOG_COMMANDS.LIBERAR_RESERVAS, OS, {}));
+    expect(await buscarInsumo(insumoId)).toMatchObject({ quantidadeDisponivel: 5, quantidadeReservada: 0 });
 
     const reservas = await request(app.getHttpServer())
       .get(`/api/catalog/reservas?osId=${OS}`).set('Authorization', admin).expect(200);
@@ -54,12 +65,28 @@ describe('Reservas pela mensageria (e2e)', () => {
   });
 
   it('reservar → baixar após a execução', async () => {
-    await registry.despachar(criarEnvelope(CATALOG_COMMANDS.RESERVAR_INSUMOS, OS, { itens: [] }));
+    const insumoId = await criarInsumo();
+    await registry.despachar(
+      criarEnvelope(CATALOG_COMMANDS.RESERVAR_INSUMOS, OS, { itens: [{ insumoId, quantidade: 2 }] }),
+    );
     await registry.despachar(criarEnvelope(CATALOG_COMMANDS.BAIXAR_RESERVAS, OS, {}));
+    expect(await buscarInsumo(insumoId)).toMatchObject({
+      quantidadeEstoque: 3,
+      quantidadeReservada: 0,
+      quantidadeDisponivel: 3,
+    });
     expect(await tiposNaOutbox()).toEqual([
       CATALOG_EVENTS.INSUMOS_RESERVADOS,
       CATALOG_EVENTS.ESTOQUE_BAIXADO,
     ]);
+  });
+
+  it('GET /reservas exige osId UUID válido (400) e perfil autorizado (403)', async () => {
+    await request(app.getHttpServer()).get('/api/catalog/reservas').set('Authorization', admin).expect(400);
+    await request(app.getHttpServer())
+      .get('/api/catalog/reservas?osId=nao-uuid').set('Authorization', admin).expect(400);
+    await request(app.getHttpServer())
+      .get(`/api/catalog/reservas?osId=${OS}`).set('Authorization', cliente).expect(403);
   });
 
   it('payload fora do contrato é rejeitado (vai para a DLQ)', async () => {

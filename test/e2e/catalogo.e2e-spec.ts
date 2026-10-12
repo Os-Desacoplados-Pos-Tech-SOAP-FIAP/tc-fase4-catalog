@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 
 import { PerfilAcesso } from '../../src/common/auth/perfil';
@@ -12,6 +13,7 @@ describe('Catálogo (e2e)', () => {
   const admin = token(PerfilAcesso.ADMINISTRADOR);
   const mecanico = token(PerfilAcesso.MECANICO);
   const cliente = token(PerfilAcesso.CLIENTE);
+  const atendente = token(PerfilAcesso.ATENDENTE);
 
   beforeAll(async () => (app = await criarApp()));
   beforeEach(() => limparBanco(app.get(PrismaService)));
@@ -27,6 +29,20 @@ describe('Catálogo (e2e)', () => {
       .post('/api/catalog/servicos')
       .set('Authorization', mecanico)
       .send({ nome: 'Troca de óleo', descricao: 'Motor', valorPadrao: 120 })
+      .expect(403);
+  });
+
+  it('rejeita token assinado com algoritmo diferente de HS256 (401)', async () => {
+    const hs512 = sign({ sub: 'usuario-teste', perfil: PerfilAcesso.ADMINISTRADOR }, process.env.JWT_SECRET as string, {
+      algorithm: 'HS512',
+      expiresIn: '1h',
+    });
+    await http().get('/api/catalog/servicos').set('Authorization', `Bearer ${hs512}`).expect(401);
+  });
+
+  it('ATENDENTE não cadastra insumo (403)', async () => {
+    await http().post('/api/catalog/insumos').set('Authorization', atendente)
+      .send({ codigo: 'FIL-001', nome: 'Filtro', tipo: 'PECA', valorUnitario: 45, quantidadeEstoque: 5 })
       .expect(403);
   });
 
