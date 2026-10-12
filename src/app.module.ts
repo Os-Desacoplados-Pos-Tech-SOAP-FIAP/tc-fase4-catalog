@@ -19,6 +19,8 @@ import { ServicoModule } from './modules/servico/servico.module';
     LoggerModule.forRoot({
       pinoHttp: {
         autoLogging: true,
+        // Token JWT e cookies nunca vão para o log.
+        redact: ['req.headers.authorization', 'req.headers.cookie'],
         // trace_id/span_id em todo log: salto direto do log para o trace no Grafana.
         mixin() {
           const span = trace.getActiveSpan();
