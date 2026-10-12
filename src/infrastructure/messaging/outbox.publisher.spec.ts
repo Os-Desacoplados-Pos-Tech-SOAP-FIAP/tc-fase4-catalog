@@ -1,6 +1,12 @@
 import { lerMessagingConfig } from './messaging.config';
 import { OutboxPublisher } from './outbox.publisher';
 
+function adiado() {
+  let resolver!: (valor: number) => void;
+  const promessa = new Promise<number>((resolve) => (resolver = resolve));
+  return { promessa, resolver };
+}
+
 describe('OutboxPublisher (ciclo de vida)', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -20,17 +26,17 @@ describe('OutboxPublisher (ciclo de vida)', () => {
     publisher.onApplicationBootstrap();
     await jest.advanceTimersByTimeAsync(3000);
     expect(publicar).toHaveBeenCalledTimes(3);
-    publisher.onApplicationShutdown();
+    await publisher.beforeApplicationShutdown();
     await jest.advanceTimersByTimeAsync(3000);
     expect(publicar).toHaveBeenCalledTimes(3);
   });
 
-  it('não agenda nada com a mensageria desligada', () => {
+  it('não agenda nada com a mensageria desligada', async () => {
     const { publisher, publicar } = criar(false);
     publisher.onApplicationBootstrap();
     jest.advanceTimersByTime(3000);
     expect(publicar).not.toHaveBeenCalled();
-    publisher.onApplicationShutdown();
+    await publisher.beforeApplicationShutdown();
   });
 
   it('erro num ciclo não derruba os próximos', async () => {
@@ -39,6 +45,39 @@ describe('OutboxPublisher (ciclo de vida)', () => {
     publisher.onApplicationBootstrap();
     await jest.advanceTimersByTimeAsync(2000);
     expect(publicar).toHaveBeenCalledTimes(2);
-    publisher.onApplicationShutdown();
+    await publisher.beforeApplicationShutdown();
+  });
+
+  it('ciclo lento não se sobrepõe ao próximo', async () => {
+    const { publisher, publicar } = criar(true);
+    const lento = adiado();
+    publicar.mockReturnValueOnce(lento.promessa);
+    publisher.onApplicationBootstrap();
+
+    await jest.advanceTimersByTimeAsync(3000);
+    expect(publicar).toHaveBeenCalledTimes(1);
+
+    lento.resolver(0);
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(publicar).toHaveBeenCalledTimes(2);
+    await publisher.beforeApplicationShutdown();
+  });
+
+  it('beforeApplicationShutdown espera o ciclo em andamento terminar', async () => {
+    const { publisher, publicar } = criar(true);
+    const lento = adiado();
+    publicar.mockReturnValueOnce(lento.promessa);
+    publisher.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    let encerrado = false;
+    const encerramento = publisher.beforeApplicationShutdown().then(() => (encerrado = true));
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(encerrado).toBe(false);
+    expect(publicar).toHaveBeenCalledTimes(1);
+
+    lento.resolver(0);
+    await encerramento;
+    expect(encerrado).toBe(true);
   });
 });

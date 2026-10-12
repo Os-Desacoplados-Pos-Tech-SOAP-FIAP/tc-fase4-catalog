@@ -63,8 +63,10 @@ model ReservaItem {
 }
 
 /// Outbox transacional: gravada junto com o estado, publicada pelo OutboxPublisher.
+/// `seq` define a ordem de publicação (criadoEm pode empatar ou vir fora de ordem entre transações).
 model Outbox {
   id          String    @id @default(uuid())
+  seq         BigInt    @unique @default(autoincrement())
   messageId   String    @unique
   type        String
   destination String
@@ -72,8 +74,10 @@ model Outbox {
   body        Json
   criadoEm    DateTime  @default(now())
   publicadoEm DateTime?
+  tentativas  Int       @default(0)
+  ultimoErro  String?
 
-  @@index([publicadoEm, criadoEm])
+  @@index([publicadoEm, seq])
 }
 
 /// Idempotência das mensagens recebidas.
