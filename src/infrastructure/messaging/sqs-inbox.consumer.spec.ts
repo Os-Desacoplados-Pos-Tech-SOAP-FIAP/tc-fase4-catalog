@@ -1,4 +1,5 @@
 import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { Logger } from '@nestjs/common';
 import { mockClient } from 'aws-sdk-client-mock';
 
 import { MessageHandlerRegistry } from './message-handler.registry';
@@ -90,13 +91,134 @@ describe('SqsInboxConsumer', () => {
     expect(sqs.commandCalls(ReceiveMessageCommand)).toHaveLength(0);
   });
 
-  it('com a mensageria ligada consome até o shutdown', async () => {
-    sqs.on(ReceiveMessageCommand).callsFake(async () => {
-      consumer.onApplicationShutdown();
-      return {};
+  it('não apaga mensagem de tipo desconhecido', async () => {
+    receber({
+      id: '1',
+      corpo: JSON.stringify({
+        messageId: 'm1',
+        type: 'desconhecido.v1',
+        occurredAt: 'agora',
+        correlationId: 'os-1',
+        payload: {},
+      }),
+      grupo: 'os-1',
     });
-    consumer.onApplicationBootstrap();
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(sqs.commandCalls(ReceiveMessageCommand).length).toBeGreaterThanOrEqual(1);
+    await consumer.consumirLote();
+    expect(handler).not.toHaveBeenCalled();
+    expect(sqs.commandCalls(DeleteMessageCommand)).toHaveLength(0);
+  });
+
+  it('loga a falha com messageId, type e correlationId', async () => {
+    const logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    handler.mockRejectedValueOnce(new Error('boom'));
+    receber({ id: '1', corpo: corpo('m1', 'os-1'), grupo: 'os-1' });
+    await consumer.consumirLote();
+    const texto = String(logErro.mock.calls[0][0]);
+    expect(texto).toContain('m1');
+    expect(texto).toContain('x.v1');
+    expect(texto).toContain('os-1');
+    expect(texto).toContain('boom');
+    logErro.mockRestore();
+  });
+
+  it('não inicia o loop com a mensageria desligada', () => {
+    const desligado = new SqsInboxConsumer(
+      new SQSClient({}),
+      lerMessagingConfig({ MESSAGING_ENABLED: 'false' }),
+      registry,
+    );
+    desligado.onApplicationBootstrap();
+    expect(sqs.commandCalls(ReceiveMessageCommand)).toHaveLength(0);
+  });
+
+  describe('ciclo de vida', () => {
+    /** Receive é um long-poll que só termina quando o sinal é abortado, como o SDK faz. */
+    const longPollAteAbortar = (comando: unknown, opcoes?: { abortSignal?: AbortSignal }) =>
+      new Promise((resolve, reject) => {
+        if (!(comando instanceof ReceiveMessageCommand)) return resolve({});
+        opcoes?.abortSignal?.addEventListener('abort', () => {
+          const erro = new Error('Request aborted');
+          erro.name = 'AbortError';
+          reject(erro);
+        });
+      });
+
+    let send: jest.Mock;
+    let logErro: jest.SpyInstance;
+    let ligado: SqsInboxConsumer;
+
+    beforeEach(() => {
+      send = jest.fn(longPollAteAbortar);
+      logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      ligado = new SqsInboxConsumer(
+        { send } as unknown as SQSClient,
+        lerMessagingConfig({ CATALOG_INBOX_QUEUE_URL: 'url-fila' }),
+        registry,
+      );
+    });
+    afterEach(() => {
+      logErro.mockRestore();
+      jest.useRealTimers();
+    });
+
+    it('beforeApplicationShutdown aborta o long-poll pendente e resolve sem logar erro', async () => {
+      ligado.onApplicationBootstrap();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send.mock.calls[0][1]?.abortSignal).toBeDefined();
+
+      await ligado.beforeApplicationShutdown();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(logErro).not.toHaveBeenCalled();
+    });
+
+    it('beforeApplicationShutdown espera o lote em processamento terminar', async () => {
+      let liberarHandler!: () => void;
+      handler.mockReturnValueOnce(new Promise<void>((resolve) => (liberarHandler = resolve)));
+      send.mockResolvedValueOnce({
+        Messages: [
+          {
+            MessageId: '1',
+            ReceiptHandle: 'rh-1',
+            Body: corpo('m1', 'os-1'),
+            Attributes: { MessageGroupId: 'os-1' },
+          },
+        ],
+      });
+      ligado.onApplicationBootstrap();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      let encerrado = false;
+      const encerramento = ligado.beforeApplicationShutdown().then(() => (encerrado = true));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(encerrado).toBe(false);
+
+      liberarHandler();
+      await encerramento;
+      const deletes = send.mock.calls.filter(([comando]) => comando instanceof DeleteMessageCommand);
+      expect(deletes).toHaveLength(1);
+      expect(logErro).not.toHaveBeenCalled();
+    });
+
+    it('falha no Receive loga e espera 1s antes de tentar de novo', async () => {
+      jest.useFakeTimers();
+      send.mockRejectedValueOnce(new Error('rede fora'));
+      ligado.onApplicationBootstrap();
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(logErro).toHaveBeenCalledTimes(1);
+      expect(String(logErro.mock.calls[0][0])).toContain('rede fora');
+
+      await jest.advanceTimersByTimeAsync(999);
+      expect(send).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(send).toHaveBeenCalledTimes(2);
+
+      await ligado.beforeApplicationShutdown();
+      expect(logErro).toHaveBeenCalledTimes(1);
+    });
   });
 });

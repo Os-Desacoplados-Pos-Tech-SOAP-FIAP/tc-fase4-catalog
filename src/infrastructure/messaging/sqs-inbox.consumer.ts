@@ -5,13 +5,14 @@ import {
   SQSClient,
 } from '@aws-sdk/client-sqs';
 import {
+  BeforeApplicationShutdown,
   Inject,
   Injectable,
   Logger,
   OnApplicationBootstrap,
-  OnApplicationShutdown,
 } from '@nestjs/common';
 
+import { MessageEnvelope } from '../../application/ports/message-envelope';
 import { lerEnvelope } from './message-envelope.parser';
 import { MessageHandlerRegistry } from './message-handler.registry';
 import { MESSAGING_CONFIG, MessagingConfig } from './messaging.config';
@@ -25,9 +26,11 @@ const PAUSA_APOS_ERRO_MS = 1000;
  * para não quebrar a ordem da saga.
  */
 @Injectable()
-export class SqsInboxConsumer implements OnApplicationBootstrap, OnApplicationShutdown {
+export class SqsInboxConsumer implements OnApplicationBootstrap, BeforeApplicationShutdown {
   private readonly logger = new Logger(SqsInboxConsumer.name);
+  private readonly encerramento = new AbortController();
   private ativo = false;
+  private loop?: Promise<void>;
 
   constructor(
     private readonly sqs: SQSClient,
@@ -38,18 +41,25 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, OnApplicationSh
   onApplicationBootstrap(): void {
     if (!this.config.enabled) return;
     this.ativo = true;
-    void this.loop();
+    this.loop = this.consumirAteEncerrar();
   }
 
-  onApplicationShutdown(): void {
+  /**
+   * Roda antes do Prisma desconectar: interrompe o long-poll pendente (até 20s) e espera
+   * o lote em processamento terminar.
+   */
+  async beforeApplicationShutdown(): Promise<void> {
     this.ativo = false;
+    this.encerramento.abort();
+    await this.loop;
   }
 
-  private async loop(): Promise<void> {
+  private async consumirAteEncerrar(): Promise<void> {
     while (this.ativo) {
       try {
         await this.consumirLote();
       } catch (erro) {
+        if (this.encerramento.signal.aborted) return; // receive abortado no shutdown, não é erro
         this.logger.error(`Falha ao ler a fila de entrada: ${(erro as Error).message}`);
         await new Promise((resolve) => setTimeout(resolve, PAUSA_APOS_ERRO_MS));
       }
@@ -65,6 +75,7 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, OnApplicationSh
         MessageSystemAttributeNames: ['MessageGroupId'],
         MessageAttributeNames: ['All'],
       }),
+      { abortSignal: this.encerramento.signal },
     );
 
     const gruposComFalha = new Set<string>();
@@ -76,8 +87,10 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, OnApplicationSh
   }
 
   private async processar(mensagem: Message): Promise<boolean> {
+    let envelope: MessageEnvelope | undefined;
     try {
-      await this.registry.despachar(lerEnvelope(mensagem.Body));
+      envelope = lerEnvelope(mensagem.Body);
+      await this.registry.despachar(envelope);
       await this.sqs.send(
         new DeleteMessageCommand({
           QueueUrl: this.config.inboxQueueUrl,
@@ -87,7 +100,10 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, OnApplicationSh
       return true;
     } catch (erro) {
       this.logger.error(
-        `Falha ao processar a mensagem ${mensagem.MessageId}: ${(erro as Error).message}`,
+        `Falha ao processar a mensagem sqsMessageId=${mensagem.MessageId} ` +
+          `messageId=${envelope?.messageId ?? '?'} type=${envelope?.type ?? '?'} ` +
+          `correlationId=${envelope?.correlationId ?? mensagem.Attributes?.MessageGroupId ?? '?'}: ` +
+          (erro as Error).message,
       );
       return false;
     }
