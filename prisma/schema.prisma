@@ -41,6 +41,8 @@ model Insumo {
   atualizadoEm        DateTime   @updatedAt
 }
 
+// Índice único parcial "Reserva_osId_ativa_key" (uma reserva ATIVA por OS) fica na migração
+// 20261012181000_reserva_ativa_unica_por_os: o Prisma não expressa índice com WHERE.
 model Reserva {
   id           String        @id
   osId         String

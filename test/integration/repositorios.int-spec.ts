@@ -109,6 +109,24 @@ describe('Repositórios Prisma (integração)', () => {
       expect(todas[0].status).toBe(StatusReserva.LIBERADA);
       expect(todas[0].itens).toHaveLength(1);
     });
+
+    it('banco garante no máximo uma reserva ATIVA por OS (índice único parcial)', async () => {
+      const insumos = new PrismaInsumoRepository(tm);
+      const insumo = novoInsumo();
+      await insumos.salvar(insumo);
+      const repo = new PrismaReservaRepository(tm);
+      const itens = [{ insumoId: insumo.id.toValue(), quantidade: 1 }];
+      const primeira = Reserva.criar('os-1', itens);
+      await repo.salvar(primeira);
+
+      // Corrida entre dois comandos de reserva da mesma OS: o segundo é barrado e reprocessado.
+      await expect(repo.salvar(Reserva.criar('os-1', itens))).rejects.toMatchObject({ code: 'P2002' });
+
+      primeira.liberar();
+      await repo.salvar(primeira);
+      await repo.salvar(Reserva.criar('os-1', itens)); // nova ATIVA após liberar é válida
+      expect(await repo.listarPorOs('os-1')).toHaveLength(2);
+    });
   });
 
   describe('PrismaProcessedMessageRepository', () => {
