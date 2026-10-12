@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
+import { erroParaLog } from './erro-para-log';
 import { lerEnvelope } from './message-envelope.parser';
 import { MessageHandlerRegistry } from './message-handler.registry';
 import { MESSAGING_CONFIG, MessagingConfig } from './messaging.config';
@@ -60,7 +61,7 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, BeforeApplicati
         await this.consumirLote();
       } catch (erro) {
         if (this.encerramento.signal.aborted) return; // receive abortado no shutdown, não é erro
-        this.logger.error(`Falha ao ler a fila de entrada: ${(erro as Error).message}`);
+        this.logger.error({ msg: 'Falha ao ler a fila de entrada', err: erroParaLog(erro) });
         await new Promise((resolve) => setTimeout(resolve, PAUSA_APOS_ERRO_MS));
       }
     }
@@ -99,12 +100,14 @@ export class SqsInboxConsumer implements OnApplicationBootstrap, BeforeApplicati
       );
       return true;
     } catch (erro) {
-      this.logger.error(
-        `Falha ao processar a mensagem sqsMessageId=${mensagem.MessageId} ` +
-          `messageId=${envelope?.messageId ?? '?'} type=${envelope?.type ?? '?'} ` +
-          `correlationId=${envelope?.correlationId ?? mensagem.Attributes?.MessageGroupId ?? '?'}: ` +
-          (erro as Error).message,
-      );
+      this.logger.error({
+        msg: 'Falha ao processar mensagem',
+        messageId: envelope?.messageId,
+        type: envelope?.type,
+        osId: envelope?.correlationId ?? mensagem.Attributes?.MessageGroupId,
+        sqsMessageId: mensagem.MessageId,
+        err: erroParaLog(erro),
+      });
       return false;
     }
   }

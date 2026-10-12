@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import { lerMessagingConfig } from './messaging.config';
 import { OutboxPublisher } from './outbox.publisher';
 
@@ -42,10 +44,19 @@ describe('OutboxPublisher (ciclo de vida)', () => {
   it('erro num ciclo não derruba os próximos', async () => {
     const { publisher, publicar } = criar(true);
     publicar.mockRejectedValueOnce(new Error('sns fora'));
-    publisher.onApplicationBootstrap();
-    await jest.advanceTimersByTimeAsync(2000);
-    expect(publicar).toHaveBeenCalledTimes(2);
-    await publisher.beforeApplicationShutdown();
+    const logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    try {
+      publisher.onApplicationBootstrap();
+      await jest.advanceTimersByTimeAsync(2000);
+      expect(publicar).toHaveBeenCalledTimes(2);
+      expect(logErro).toHaveBeenCalledWith({
+        msg: 'Falha ao publicar a outbox',
+        err: { message: 'sns fora', name: 'Error' },
+      });
+      await publisher.beforeApplicationShutdown();
+    } finally {
+      logErro.mockRestore();
+    }
   });
 
   it('ciclo lento não se sobrepõe ao próximo', async () => {

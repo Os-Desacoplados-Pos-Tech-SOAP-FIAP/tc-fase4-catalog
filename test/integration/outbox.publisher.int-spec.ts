@@ -72,12 +72,16 @@ describe('OutboxPublisher (integração)', () => {
 
     expect(await publisher.publicarPendentes()).toBe(1);
     expect(idsEnviados()).toEqual([b1.messageId]);
-    const log = String(logErro.mock.calls[0][0]);
+    const log = logErro.mock.calls[0][0];
     logErro.mockRestore();
-    expect(log).toContain(`id=${(await linha(a1)).id}`);
-    expect(log).toContain('groupId=os-1');
-    expect(log).toContain('type=t.a1');
-    expect(log).toContain('sns fora');
+    expect(log).toEqual({
+      msg: 'Falha ao publicar mensagem da outbox',
+      outboxId: (await linha(a1)).id,
+      messageId: a1.messageId,
+      type: 't.a1',
+      osId: 'os-1',
+      err: { message: 'sns fora', name: 'Error' },
+    });
     expect(await linha(a1)).toMatchObject({ publicadoEm: null, tentativas: 1, ultimoErro: 'sns fora' });
     expect(await linha(a2)).toMatchObject({ publicadoEm: null, tentativas: 0, ultimoErro: null });
     expect((await linha(b1)).publicadoEm).not.toBeNull();

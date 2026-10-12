@@ -108,17 +108,37 @@ describe('SqsInboxConsumer', () => {
     expect(sqs.commandCalls(DeleteMessageCommand)).toHaveLength(0);
   });
 
-  it('loga a falha com messageId, type e correlationId', async () => {
+  it('loga a falha estruturada com messageId, type, osId e sqsMessageId', async () => {
     const logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
-    handler.mockRejectedValueOnce(new Error('boom'));
-    receber({ id: '1', corpo: corpo('m1', 'os-1'), grupo: 'os-1' });
-    await consumer.consumirLote();
-    const texto = String(logErro.mock.calls[0][0]);
-    expect(texto).toContain('m1');
-    expect(texto).toContain('x.v1');
-    expect(texto).toContain('os-1');
-    expect(texto).toContain('boom');
-    logErro.mockRestore();
+    try {
+      handler.mockRejectedValueOnce(new TypeError('boom'));
+      receber({ id: '1', corpo: corpo('m1', 'os-1'), grupo: 'os-1' });
+      await consumer.consumirLote();
+      expect(logErro).toHaveBeenCalledWith({
+        msg: 'Falha ao processar mensagem',
+        messageId: 'm1',
+        type: 'x.v1',
+        osId: 'os-1',
+        sqsMessageId: '1',
+        err: { message: 'boom', name: 'TypeError' },
+      });
+    } finally {
+      logErro.mockRestore();
+    }
+  });
+
+  it('mensagem ilegível loga osId pelo MessageGroupId', async () => {
+    const logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    try {
+      receber({ id: '9', corpo: 'nao-json', grupo: 'os-7' });
+      await consumer.consumirLote();
+      expect(logErro).toHaveBeenCalledWith(
+        expect.objectContaining({ msg: 'Falha ao processar mensagem', osId: 'os-7', sqsMessageId: '9' }),
+      );
+      expect(logErro.mock.calls[0][0]).not.toHaveProperty('messageId', expect.anything());
+    } finally {
+      logErro.mockRestore();
+    }
   });
 
   it('não inicia o loop com a mensageria desligada', () => {
@@ -210,7 +230,10 @@ describe('SqsInboxConsumer', () => {
       await jest.advanceTimersByTimeAsync(0);
       expect(send).toHaveBeenCalledTimes(1);
       expect(logErro).toHaveBeenCalledTimes(1);
-      expect(String(logErro.mock.calls[0][0])).toContain('rede fora');
+      expect(logErro).toHaveBeenCalledWith({
+        msg: 'Falha ao ler a fila de entrada',
+        err: { message: 'rede fora', name: 'Error' },
+      });
 
       await jest.advanceTimersByTimeAsync(999);
       expect(send).toHaveBeenCalledTimes(1);

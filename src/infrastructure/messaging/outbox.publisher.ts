@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 
 import { MessageEnvelope } from '../../application/ports/message-envelope';
 import { PrismaService } from '../database/prisma.service';
+import { erroParaLog } from './erro-para-log';
 import { MESSAGING_CONFIG, MessagingConfig } from './messaging.config';
 import { SnsSqsTransport } from './sns-sqs.transport';
 
@@ -80,7 +81,7 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
     try {
       await this.publicarPendentes();
     } catch (erro) {
-      this.logger.error(`Falha ao publicar a outbox: ${(erro as Error).message}`);
+      this.logger.error({ msg: 'Falha ao publicar a outbox', err: erroParaLog(erro) });
     }
   }
 
@@ -138,9 +139,14 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
       } catch (erro) {
         gruposComFalha.add(pendente.groupId);
         const motivo = (erro as Error).message;
-        this.logger.error(
-          `Falha ao publicar outbox id=${pendente.id} groupId=${pendente.groupId} type=${pendente.type}: ${motivo}`,
-        );
+        this.logger.error({
+          msg: 'Falha ao publicar mensagem da outbox',
+          outboxId: pendente.id,
+          messageId: pendente.body.messageId,
+          type: pendente.type,
+          osId: pendente.groupId,
+          err: erroParaLog(erro),
+        });
         await tx.outbox.update({
           where: { id: pendente.id },
           data: { tentativas: { increment: 1 }, ultimoErro: motivo.slice(0, TAMANHO_MAXIMO_ERRO) },
