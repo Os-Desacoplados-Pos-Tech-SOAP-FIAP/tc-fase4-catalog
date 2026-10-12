@@ -106,7 +106,9 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
   /**
    * Só a mensagem mais antiga de cada OS entra na rodada: backlog de uma OS não ocupa o
    * lote e a ordem por OS é preservada. OS que já falharam no ciclo ficam de fora das
-   * rodadas seguintes, liberando o lote para as demais (sem inanição).
+   * rodadas seguintes, liberando o lote para as demais (sem inanição). OS sem falha
+   * anterior vêm primeiro: as que já falharam (e podem demorar até o timeout) não consomem
+   * o prazo do ciclo antes das saudáveis.
    * Sem FOR UPDATE: o advisory lock já garante um só publicador.
    */
   private cabecasDosGrupos(
@@ -114,13 +116,14 @@ export class OutboxPublisher implements OnApplicationBootstrap, BeforeApplicatio
     gruposComFalha: Set<string>,
   ): Promise<OutboxPendente[]> {
     return tx.$queryRaw<OutboxPendente[]>`
-      SELECT * FROM (
-        SELECT DISTINCT ON ("groupId") "id", "destination", "body", "groupId", "type", "traceparent", "seq"
+      SELECT h."id", h."destination", h."body", h."groupId", h."type", h."traceparent" FROM (
+        SELECT DISTINCT ON ("groupId")
+          "id", "destination", "body", "groupId", "type", "traceparent", "seq", "tentativas"
         FROM "Outbox"
         WHERE "publicadoEm" IS NULL AND NOT ("groupId" = ANY(${[...gruposComFalha]}::text[]))
         ORDER BY "groupId", "seq"
       ) h
-      ORDER BY h."seq"
+      ORDER BY (h."tentativas" > 0), h."seq"
       LIMIT ${LOTE}`;
   }
 

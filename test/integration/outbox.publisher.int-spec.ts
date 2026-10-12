@@ -181,5 +181,23 @@ describe('OutboxPublisher (integração)', () => {
       expect((await linha(backlog[0])).tentativas).toBe(1);
       expect((await linha(backlog[1])).tentativas).toBe(0);
     });
+
+    it('OS sem falha anterior sai antes das que já falharam, mesmo com seq maior', async () => {
+      // Cada envio quebrado demora ~2s: 3 deles na frente esgotariam o prazo do ciclo.
+      enviar.mockImplementation(async (destino: string, envelope: MessageEnvelope) => {
+        if (envelope.correlationId.startsWith('os-quebrada')) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+        await falhaNasOsQuebradas(destino, envelope);
+      });
+      for (let i = 0; i < 3; i++) await registrar(`t.q${i}`, `os-quebrada-${i}`);
+      // Simula um ciclo anterior em que as quebradas já falharam.
+      await prisma.outbox.updateMany({ data: { tentativas: 1 } });
+      const ok = await registrar('t.ok', 'os-saudavel');
+
+      expect(await publisher.publicarPendentes()).toBe(1);
+      expect(idsEnviados()).toEqual([ok.messageId]);
+      expect(enviar.mock.calls[0][1].messageId).toBe(ok.messageId);
+    }, 15_000);
   });
 });
