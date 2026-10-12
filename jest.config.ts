@@ -1,6 +1,6 @@
 import type { Config } from 'jest';
 
-const transform = { '^.+\.(t|j)s$': 'ts-jest' };
+const transform = { '^.+\\.(t|j)s$': 'ts-jest' };
 const base = {
   rootDir: '.',
   testEnvironment: 'node',
@@ -27,17 +27,17 @@ const config: Config = {
   coverageDirectory: './coverage',
   coverageReporters: ['text-summary', 'lcov', 'clover'],
   projects: [
-    { ...base, displayName: 'unit', testRegex: 'src/.*\.spec\.ts$' },
+    { ...base, displayName: 'unit', testRegex: 'src/.*\\.spec\\.ts$' },
     {
       ...base,
       displayName: 'integration',
-      testRegex: 'test/integration/.*\.int-spec\.ts$',
+      testRegex: 'test/integration/.*\\.int-spec\\.ts$',
       globalSetup: '<rootDir>/test/global-setup.ts',
     },
     {
       ...base,
       displayName: 'e2e',
-      testRegex: 'test/e2e/.*\.e2e-spec\.ts$',
+      testRegex: 'test/e2e/.*\\.e2e-spec\\.ts$',
       globalSetup: '<rootDir>/test/global-setup.ts',
     },
   ],

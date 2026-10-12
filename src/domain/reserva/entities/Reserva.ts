@@ -51,7 +51,7 @@ export class Reserva extends AggregateRoot<ReservaProps> {
   }
 
   public static restaurar(props: ReservaProps, id: UniqueID): Reserva {
-    return new Reserva(props, id);
+    return new Reserva({ ...props, itens: props.itens.map((item) => ({ ...item })) }, id);
   }
 
   public get osId(): string {
