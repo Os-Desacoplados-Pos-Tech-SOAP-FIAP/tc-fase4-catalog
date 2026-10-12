@@ -63,6 +63,7 @@ export class PrismaInsumoRepository implements IInsumoLockingRepository {
     return rows.map((row) => this.toDomain(row));
   }
 
+  /** Deve rodar dentro de `ITransactionManager.run`; fora dela o lock é liberado imediatamente. */
   async buscarParaAtualizacao(ids: UniqueID[]): Promise<Insumo[]> {
     if (ids.length === 0) return [];
     const valores = ids.map((id) => id.toValue());
