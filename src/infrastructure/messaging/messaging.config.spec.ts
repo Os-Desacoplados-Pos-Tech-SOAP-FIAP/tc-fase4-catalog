@@ -7,8 +7,8 @@ describe('lerMessagingConfig', () => {
         MESSAGING_ENABLED: 'true',
         AWS_REGION: 'sa-east-1',
         AWS_ENDPOINT_URL: 'http://localhost:4566',
-        CATALOG_INBOX_QUEUE_URL: 'url-fila',
-        CATALOG_EVENTS_TOPIC_ARN: 'arn-topico',
+        INBOX_QUEUE_URL: 'url-fila',
+        EVENTS_TOPIC_ARN: 'arn-topico',
       }),
     ).toEqual({
       enabled: true,

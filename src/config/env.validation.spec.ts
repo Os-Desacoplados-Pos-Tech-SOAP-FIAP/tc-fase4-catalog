@@ -9,7 +9,7 @@ describe('validarAmbiente', () => {
 
   it('exige fila e tópico com a mensageria ligada', () => {
     expect(() => validarAmbiente(base)).toThrow(
-      'Variáveis de ambiente ausentes: CATALOG_INBOX_QUEUE_URL, CATALOG_EVENTS_TOPIC_ARN',
+      'Variáveis de ambiente ausentes: INBOX_QUEUE_URL, EVENTS_TOPIC_ARN',
     );
   });
 

@@ -14,7 +14,7 @@ export function lerMessagingConfig(env: NodeJS.ProcessEnv): MessagingConfig {
     enabled: env.MESSAGING_ENABLED !== 'false',
     region: env.AWS_REGION ?? 'us-east-1',
     endpoint: env.AWS_ENDPOINT_URL || undefined,
-    inboxQueueUrl: env.CATALOG_INBOX_QUEUE_URL ?? '',
-    eventsTopicArn: env.CATALOG_EVENTS_TOPIC_ARN ?? '',
+    inboxQueueUrl: env.INBOX_QUEUE_URL ?? '',
+    eventsTopicArn: env.EVENTS_TOPIC_ARN ?? '',
   };
 }

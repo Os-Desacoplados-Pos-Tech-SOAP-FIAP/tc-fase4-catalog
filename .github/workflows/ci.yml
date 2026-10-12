@@ -63,6 +63,9 @@ jobs:
           path: coverage/
           if-no-files-found: warn
 
+      - name: Imagem Docker
+        run: docker build -f docker/Dockerfile -t tc-fase4-catalog:ci .
+
       - name: SonarCloud
         uses: SonarSource/sonarqube-scan-action@v5
         env:

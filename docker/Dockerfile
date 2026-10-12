@@ -16,6 +16,8 @@ COPY package*.json ./
 COPY prisma ./prisma/
 RUN npm ci --omit=dev && npm cache clean --force && npx prisma generate
 COPY --from=builder /app/dist ./dist
+# Arquivos ficam com dono root (somente leitura para o app); o processo roda sem privilégios.
+USER node
 EXPOSE 3000
 # Liveness pelo endpoint público, sem auth e sem banco.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \

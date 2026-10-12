@@ -22,7 +22,7 @@ describe('SqsInboxConsumer', () => {
     registry.registrar('x.v1', handler);
     consumer = new SqsInboxConsumer(
       new SQSClient({}),
-      lerMessagingConfig({ CATALOG_INBOX_QUEUE_URL: 'url-fila' }),
+      lerMessagingConfig({ INBOX_QUEUE_URL: 'url-fila' }),
       registry,
     );
   });
@@ -141,13 +141,14 @@ describe('SqsInboxConsumer', () => {
     }
   });
 
-  it('não inicia o loop com a mensageria desligada', () => {
+  it('com a mensageria desligada, o encerramento resolve sem loop pendente', async () => {
     const desligado = new SqsInboxConsumer(
       new SQSClient({}),
       lerMessagingConfig({ MESSAGING_ENABLED: 'false' }),
       registry,
     );
     desligado.onApplicationBootstrap();
+    await expect(desligado.beforeApplicationShutdown()).resolves.toBeUndefined();
     expect(sqs.commandCalls(ReceiveMessageCommand)).toHaveLength(0);
   });
 
@@ -172,7 +173,7 @@ describe('SqsInboxConsumer', () => {
       logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
       ligado = new SqsInboxConsumer(
         { send } as unknown as SQSClient,
-        lerMessagingConfig({ CATALOG_INBOX_QUEUE_URL: 'url-fila' }),
+        lerMessagingConfig({ INBOX_QUEUE_URL: 'url-fila' }),
         registry,
       );
     });

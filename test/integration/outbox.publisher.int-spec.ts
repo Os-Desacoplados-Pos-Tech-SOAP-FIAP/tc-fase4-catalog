@@ -32,7 +32,7 @@ describe('OutboxPublisher (integração)', () => {
     prisma = await conectar();
     outbox = new PrismaOutbox(
       new PrismaTransactionManager(prisma),
-      lerMessagingConfig({ CATALOG_EVENTS_TOPIC_ARN: 'arn:aws:sns:us-east-1:1:t.fifo' }),
+      lerMessagingConfig({ EVENTS_TOPIC_ARN: 'arn:aws:sns:us-east-1:1:t.fifo' }),
     );
   });
   beforeEach(async () => {
@@ -69,11 +69,14 @@ describe('OutboxPublisher (integração)', () => {
       throw new Error('sns fora');
     });
     const logErro = jest.spyOn(Logger.prototype, 'error').mockImplementation();
-
-    expect(await publisher.publicarPendentes()).toBe(1);
+    let log: unknown;
+    try {
+      expect(await publisher.publicarPendentes()).toBe(1);
+      log = logErro.mock.calls[0][0];
+    } finally {
+      logErro.mockRestore();
+    }
     expect(idsEnviados()).toEqual([b1.messageId]);
-    const log = logErro.mock.calls[0][0];
-    logErro.mockRestore();
     expect(log).toEqual({
       msg: 'Falha ao publicar mensagem da outbox',
       outboxId: (await linha(a1)).id,

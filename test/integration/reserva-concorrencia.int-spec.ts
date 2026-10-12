@@ -24,7 +24,7 @@ describe('ReservarInsumos com Postgres (integração)', () => {
       new PrismaProcessedMessageRepository(tm),
       insumos,
       new PrismaReservaRepository(tm),
-      new PrismaOutbox(tm, lerMessagingConfig({ CATALOG_EVENTS_TOPIC_ARN: 'arn:topico' })),
+      new PrismaOutbox(tm, lerMessagingConfig({ EVENTS_TOPIC_ARN: 'arn:topico' })),
     );
   });
   beforeEach(() => limparBanco(prisma));

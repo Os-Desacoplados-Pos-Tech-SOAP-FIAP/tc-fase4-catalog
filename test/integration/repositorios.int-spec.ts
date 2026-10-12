@@ -149,7 +149,7 @@ describe('Repositórios Prisma (integração)', () => {
 
   describe('PrismaOutbox', () => {
     it('grava o envelope com destino = tópico do serviço e grupo = OS', async () => {
-      const config = lerMessagingConfig({ CATALOG_EVENTS_TOPIC_ARN: 'arn:aws:sns:us-east-1:1:topico.fifo' });
+      const config = lerMessagingConfig({ EVENTS_TOPIC_ARN: 'arn:aws:sns:us-east-1:1:topico.fifo' });
       const outbox = new PrismaOutbox(tm, config);
       const envelope = criarEnvelope('catalog.x.v1', 'os-1', { a: 1 });
       await outbox.publicar(envelope);
