@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import { Insumo, TipoInsumo } from '../../../domain/insumo/entities/Insumo';
 import { Reserva, StatusReserva } from '../../../domain/reserva/entities/Reserva';
 import { FakeTransactionManager } from '../../../../test/fakes/fake-transaction.manager';
@@ -45,6 +47,33 @@ describe('LiberarReservasUseCase', () => {
   it('sem reserva ativa, só confirma (compensação idempotente)', async () => {
     await useCase.execute({ messageId: 'cmp-1', correlationId: 'outra-os' });
     expect(outbox.tipos()).toEqual([CATALOG_EVENTS.RESERVAS_LIBERADAS]);
+  });
+
+  describe('aviso de compensação após a baixa', () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => (warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()));
+    afterEach(() => warn.mockRestore());
+
+    it('reserva já BAIXADA loga warn com osId e messageId e ainda confirma', async () => {
+      const reserva = (await reservas.listarPorOs(OS))[0];
+      reserva.baixar();
+      await reservas.salvar(reserva);
+
+      await useCase.execute({ messageId: 'cmp-2', correlationId: OS });
+      expect(warn).toHaveBeenCalledWith(expect.objectContaining({ osId: OS, messageId: 'cmp-2' }));
+      expect(outbox.tipos()).toEqual([CATALOG_EVENTS.RESERVAS_LIBERADAS]);
+    });
+
+    it('OS sem reserva nenhuma (compensação antes de reservar) não loga warn', async () => {
+      await useCase.execute({ messageId: 'cmp-1', correlationId: 'outra-os' });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('reserva já LIBERADA (compensação repetida) não loga warn', async () => {
+      await useCase.execute({ messageId: 'cmp-1', correlationId: OS });
+      await useCase.execute({ messageId: 'cmp-2', correlationId: OS });
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   it('mensagem repetida não libera duas vezes', async () => {

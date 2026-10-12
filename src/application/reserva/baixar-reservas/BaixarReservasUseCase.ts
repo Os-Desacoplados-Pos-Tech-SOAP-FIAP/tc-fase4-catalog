@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { INJECTION_TOKENS } from '../../../common/constants/injection-tokens';
 import { IInsumoLockingRepository } from '../../../domain/insumo/repositories/IInsumoLockingRepository';
@@ -14,6 +14,8 @@ import { localizarInsumo } from '../localizar-insumo';
 /** Passo repetível pós-pivô: consome do estoque o que estava reservado para a OS. */
 @Injectable()
 export class BaixarReservasUseCase {
+  private readonly logger = new Logger(BaixarReservasUseCase.name);
+
   constructor(
     @Inject(INJECTION_TOKENS.TRANSACTION_MANAGER)
     private readonly transacao: ITransactionManager,
@@ -43,6 +45,12 @@ export class BaixarReservasUseCase {
         }
         reserva.baixar();
         await this.reservas.salvar(reserva);
+      } else {
+        this.logger.warn({
+          msg: 'Baixa sem reserva ativa: estoque-baixado sai sem itens',
+          osId: input.correlationId,
+          messageId: input.messageId,
+        });
       }
 
       await this.outbox.publicar(

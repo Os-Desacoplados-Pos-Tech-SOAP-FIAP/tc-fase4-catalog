@@ -1,7 +1,8 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { INJECTION_TOKENS } from '../../../common/constants/injection-tokens';
 import { IInsumoLockingRepository } from '../../../domain/insumo/repositories/IInsumoLockingRepository';
+import { StatusReserva } from '../../../domain/reserva/entities/Reserva';
 import { IReservaRepository } from '../../../domain/reserva/repositories/IReservaRepository';
 import { UniqueID } from '../../../domain/shared/UniqueID';
 import { ContextoMensagem, criarEnvelope } from '../../ports/message-envelope';
@@ -14,6 +15,8 @@ import { localizarInsumo } from '../localizar-insumo';
 /** Compensação da saga: devolve o saldo reservado. Sempre confirma, mesmo sem reserva. */
 @Injectable()
 export class LiberarReservasUseCase {
+  private readonly logger = new Logger(LiberarReservasUseCase.name);
+
   constructor(
     @Inject(INJECTION_TOKENS.TRANSACTION_MANAGER)
     private readonly transacao: ITransactionManager,
@@ -43,6 +46,8 @@ export class LiberarReservasUseCase {
         }
         reserva.liberar();
         await this.reservas.salvar(reserva);
+      } else {
+        await this.avisarSeJaBaixada(input);
       }
 
       await this.outbox.publicar(
@@ -53,6 +58,20 @@ export class LiberarReservasUseCase {
           input.messageId,
         ),
       );
+    });
+  }
+
+  /**
+   * Sem reserva nenhuma é compensação normal (falhou antes de reservar). Já BAIXADA indica
+   * compensação depois do pivô: o estoque consumido não volta e precisa de atenção.
+   */
+  private async avisarSeJaBaixada(input: ContextoMensagem): Promise<void> {
+    const reservasDaOs = await this.reservas.listarPorOs(input.correlationId);
+    if (!reservasDaOs.some((reserva) => reserva.status === StatusReserva.BAIXADA)) return;
+    this.logger.warn({
+      msg: 'Liberação de OS com reserva já baixada: estoque não foi devolvido',
+      osId: input.correlationId,
+      messageId: input.messageId,
     });
   }
 }

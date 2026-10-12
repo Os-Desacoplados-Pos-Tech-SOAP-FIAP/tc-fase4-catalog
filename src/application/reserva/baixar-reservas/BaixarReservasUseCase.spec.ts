@@ -1,3 +1,5 @@
+import { Logger } from '@nestjs/common';
+
 import { Insumo, TipoInsumo } from '../../../domain/insumo/entities/Insumo';
 import { Reserva, StatusReserva } from '../../../domain/reserva/entities/Reserva';
 import { FakeTransactionManager } from '../../../../test/fakes/fake-transaction.manager';
@@ -46,6 +48,24 @@ describe('BaixarReservasUseCase', () => {
   it('sem reserva ativa publica estoque-baixado sem itens', async () => {
     await useCase.execute({ messageId: 'cmd-9', correlationId: 'os-sem-insumos' });
     expect(outbox.mensagens[0].payload).toEqual({ osId: 'os-sem-insumos', itens: [] });
+  });
+
+  describe('aviso de baixa sem reserva ativa', () => {
+    let warn: jest.SpyInstance;
+    beforeEach(() => (warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation()));
+    afterEach(() => warn.mockRestore());
+
+    it('sem reserva ativa loga warn com osId e messageId', async () => {
+      await useCase.execute({ messageId: 'cmd-9', correlationId: 'os-sem-insumos' });
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({ osId: 'os-sem-insumos', messageId: 'cmd-9' }),
+      );
+    });
+
+    it('com reserva ativa não loga warn', async () => {
+      await useCase.execute({ messageId: 'cmd-9', correlationId: OS });
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   it('mensagem repetida não baixa duas vezes', async () => {
