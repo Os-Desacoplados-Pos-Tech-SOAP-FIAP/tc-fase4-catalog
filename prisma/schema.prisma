@@ -58,6 +58,8 @@ model ReservaItem {
   insumoId   String
   quantidade Int
   reserva    Reserva @relation(fields: [reservaId], references: [id], onDelete: Cascade)
+
+  @@index([reservaId])
 }
 
 /// Outbox transacional: gravada junto com o estado, publicada pelo OutboxPublisher.
