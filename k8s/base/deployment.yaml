@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  labels:
+    app.kubernetes.io/name: catalog
+    app.kubernetes.io/part-of: oficina-fase4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: catalog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: catalog
+        app.kubernetes.io/part-of: oficina-fase4
+    spec:
+      serviceAccountName: catalog
+      # Migrations antes do container principal. O Prisma CLI está em dependencies
+      # (presente na imagem de produção): --no-install usa o binário local, sem download.
+      initContainers:
+        - name: prisma-migrate
+          image: catalog
+          command: ['npx', '--no-install', 'prisma', 'migrate', 'deploy']
+          envFrom:
+            - secretRef:
+                name: catalog-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      containers:
+        - name: catalog
+          image: catalog
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: catalog-config
+            - secretRef:
+                name: catalog-secret
+          # Endpoint público, sem auth e sem banco.
+          readinessProbe:
+            httpGet:
+              path: /api/catalog/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/catalog/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
