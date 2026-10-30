@@ -46,6 +46,53 @@ Corpo padronizado: `{ statusCode, error, code, message }`.
 
 ## Arquitetura
 
+O Catalog recebe comandos da saga pela inbox SQS FIFO, aplica a regra de estoque em transação no PostgreSQL e
+devolve o resultado como evento via outbox. A API REST atende o cadastro e a consulta de preço feita pelo OS.
+
+```mermaid
+flowchart LR
+    OS["OS Service"]
+
+    subgraph Catalog["Catalog Service (NestJS)"]
+        API["API REST /api/catalog<br/>ServicoController, InsumoController,<br/>ReservaController"]
+        CONS["SqsInboxConsumer<br/>+ MessageHandlerRegistry"]
+        UC["Casos de uso de reserva<br/>ReservarInsumosUseCase<br/>LiberarReservasUseCase<br/>BaixarReservasUseCase"]
+        PUB["OutboxPublisher<br/>(lock advisory, ciclo 1 s)"]
+        subgraph DB["PostgreSQL"]
+            T1[("Servico, Insumo,<br/>Reserva, ReservaItem")]
+            T2[("Outbox,<br/>ProcessedMessage")]
+        end
+    end
+
+    IN[["oficina-catalog-inbox.fifo"]]
+    DLQ[["oficina-catalog-inbox-dlq.fifo"]]
+    EV[["oficina-catalog-events.fifo"]]
+    OSIN[["inbox do OS Service"]]
+
+    OS -- "REST: GET /servicos/:id, /insumos/:id (preço)" --> API
+    API --> T1
+    OS -- "comandos catalog.*.v1" --> IN
+    IN --> CONS
+    IN -. "3 recebimentos sem sucesso" .-> DLQ
+    CONS --> UC
+    UC -- "mesma transação" --> T1
+    UC -- "mesma transação" --> T2
+    T2 --> PUB
+    PUB -- "eventos catalog.*.v1" --> EV
+    EV --> OSIN
+```
+
+Ciclo de vida da `Reserva`: nasce `ATIVA` e termina `LIBERADA` (compensação da saga) ou `BAIXADA` (após a execução).
+
+```mermaid
+stateDiagram-v2
+    [*] --> ATIVA: catalog.reservar-insumos.v1
+    ATIVA --> LIBERADA: catalog.liberar-reservas.v1
+    ATIVA --> BAIXADA: catalog.baixar-reservas.v1
+    LIBERADA --> [*]
+    BAIXADA --> [*]
+```
+
 - Camadas DDD: `domain` (Servico, Insumo, Reserva) → `application` (casos de uso e portas)
   → `infrastructure` (Prisma, SNS/SQS, JWT) e `modules` (HTTP e handlers de mensagem).
 - **Banco próprio:** PostgreSQL (consistência forte para a reserva de estoque).
