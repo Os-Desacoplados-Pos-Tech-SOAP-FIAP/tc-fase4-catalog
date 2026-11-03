@@ -41,7 +41,8 @@ resource "aws_db_instance" "this" {
   storage_type      = "gp3"
   storage_encrypted = true
 
-  db_name  = "catalog"
+  # "catalog" é palavra reservada no RDS para PostgreSQL (CreateDBInstance recusa).
+  db_name  = "catalog_db"
   username = "catalog"
   password = random_password.db.result
 
