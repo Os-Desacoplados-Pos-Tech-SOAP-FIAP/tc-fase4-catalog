@@ -41,9 +41,9 @@ resource "aws_db_instance" "this" {
   storage_type      = "gp3"
   storage_encrypted = true
 
-  # "catalog" é palavra reservada no RDS para PostgreSQL (CreateDBInstance recusa).
+  # "catalog" é palavra reservada no RDS para PostgreSQL, como nome de banco e de usuário.
   db_name  = "catalog_db"
-  username = "catalog"
+  username = "catalog_app"
   password = random_password.db.result
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
